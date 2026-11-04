@@ -5,6 +5,7 @@ import {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
+  type SendableChannels,
 } from "discord.js";
 import {
   joinVoiceChannel,
@@ -50,6 +51,7 @@ export class JarvisBot {
   private queuedAsr = 0;
   private epoch = 0;
   private streams = new Set<{ destroy: () => unknown }>();
+  private replyChannel: SendableChannels | null = null;
   private guildId = process.env.DISCORD_GUILD_ID ?? "";
   constructor(
     private store: Store,
@@ -121,7 +123,10 @@ export class JarvisBot {
         }
         const member = await i.guild!.members.fetch(i.user.id);
         if (!command || removeWake(command) === "") {
-          await this.join(member.voice.channel);
+          await this.join(
+            member.voice.channel,
+            i.channel?.isSendable() ? i.channel : null,
+          );
           await i.editReply(
             "Я в голосовом канале. Скажи «Джарвис». Аудио обрабатывается на вашем сервере, записи не сохраняются.",
           );
@@ -129,8 +134,8 @@ export class JarvisBot {
         }
         this.checkChannel(member.voice.channelId);
         const result = this.run(command, i.user.id, "Discord");
-        await this.effect(result);
-        await i.editReply(result.reply);
+        await this.effect(result, (text) => i.editReply(text));
+        if (result.action !== "help") await i.editReply(result.reply);
       } catch (e) {
         await i
           .editReply(
@@ -145,14 +150,16 @@ export class JarvisBot {
       if (text === null) return;
       try {
         const member = await m.guild!.members.fetch(m.author.id);
-        if (!this.connection) await this.join(member.voice.channel);
+        if (!this.connection) await this.join(member.voice.channel, m.channel);
         this.checkChannel(member.voice.channelId);
         const result = this.run(text, m.author.id, "Discord");
-        await this.effect(result);
-        await m.reply({
-          content: result.reply,
-          allowedMentions: { parse: [], repliedUser: false },
-        });
+        const reply = (text: string) =>
+          m.reply({
+            content: text,
+            allowedMentions: { parse: [], repliedUser: false },
+          });
+        await this.effect(result, reply);
+        if (result.action !== "help") await reply(result.reply);
       } catch (e) {
         await m
           .reply({
@@ -186,7 +193,7 @@ export class JarvisBot {
         "Не удалось авторизовать Discord-бота. Проверь токен и intents.";
     }
   }
-  async join(channel: any) {
+  async join(channel: any, replyChannel: SendableChannels | null = null) {
     if (!channel || channel.type !== ChannelType.GuildVoice)
       throw new Error("Сначала войди в обычный голосовой канал.");
     if (channel.guild.id !== this.guildId)
@@ -194,6 +201,7 @@ export class JarvisBot {
     if (this.connection) {
       if (this.connection.joinConfig.channelId !== channel.id)
         throw new Error("Я уже в другом канале. Сначала отключи меня там.");
+      if (replyChannel) this.replyChannel = replyChannel;
       return;
     }
     const me = channel.guild.members.me;
@@ -236,6 +244,7 @@ export class JarvisBot {
       throw new Error("Discord не установил голосовое соединение.");
     }
     conn.subscribe(this.player);
+    this.replyChannel = replyChannel;
     this.status.channel = channel.name;
     this.status.listening = true;
     this.status.lastError = null;
@@ -314,7 +323,11 @@ export class JarvisBot {
               )
                 return;
               const result = this.run(addressed ?? transcript, userId, "Голос");
-              await this.effect(result);
+              // Keep ASR responsive while speech is playing, so «стоп» can interrupt it.
+              void this.effect(result).catch(() => {
+                this.status.lastError =
+                  "Не удалось выполнить голосовую команду.";
+              });
             } catch (e) {
               this.status.lastError =
                 e instanceof Error ? e.message : "Ошибка распознавания.";
@@ -355,11 +368,41 @@ export class JarvisBot {
     this.streams.clear();
     this.connection?.destroy();
     this.connection = null;
+    this.replyChannel = null;
     this.wake.clear();
     this.status.channel = null;
     this.status.listening = false;
   }
-  async effect(result: Outcome) {
+  async effect(
+    result: Outcome,
+    helpReply?: (text: string) => Promise<unknown>,
+  ) {
+    if (result.action === "help") {
+      this.stop();
+      const channel = this.replyChannel;
+      const reply =
+        helpReply ??
+        (channel
+          ? (text: string) =>
+              channel.send({
+                content: text,
+                allowedMentions: { parse: [] },
+              })
+          : undefined);
+      if (!reply) {
+        await this.say("Список команд доступен в веб-панели.");
+        return;
+      }
+      try {
+        await reply(result.reply);
+      } catch {
+        this.status.lastError = "Не удалось отправить команды в текстовый чат.";
+        await this.say("Не могу написать в чат. Проверьте мои права.");
+        return;
+      }
+      await this.say("Команды отправил в чат.");
+      return;
+    }
     if (result.action === "stop") {
       this.stop();
       return;
