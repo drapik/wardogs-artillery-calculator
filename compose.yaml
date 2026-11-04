@@ -1,0 +1,73 @@
+services:
+  app:
+    build: .
+    image: wardogs-jarvis:1.0.0
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TTS_URL: http://piper:8000
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - data:/app/data
+    networks: [default, proxy]
+    depends_on:
+      piper:
+        condition: service_healthy
+    mem_limit: 768m
+    cpus: 1.5
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: proxy
+      traefik.http.routers.jarvis.rule: Host(`jarvis.dixel.store`)
+      traefik.http.routers.jarvis.entrypoints: https
+      traefik.http.routers.jarvis.tls: "true"
+      traefik.http.services.jarvis.loadbalancer.server.port: "3000"
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+  piper:
+    build: services/piper
+    image: wardogs-jarvis-piper:1.0.0
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 2
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+volumes:
+  data:
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.16.30.0/28
+  proxy:
+    external: true

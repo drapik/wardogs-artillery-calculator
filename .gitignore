@@ -27,3 +27,9 @@ public/models/*
 *.njsproj
 *.sln
 *.sw?
+
+# Deployment secrets and room state
+.env
+.env.*
+!.env.example
+data/

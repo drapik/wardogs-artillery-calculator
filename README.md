@@ -1,71 +1,59 @@
-# WARDOGS Artillery Calculator
+# Джарвис · WARDOGS
 
-A browser-based coordinate calculator for WARDOGS. It calculates distance, coordinate differences, and azimuth entirely in the browser.
+Discord-помощник на русском с голосовым управлением и общей веб-панелью. Форк [Stiffi136/wardogs-artillery-calculator](https://github.com/Stiffi136/wardogs-artillery-calculator). Исходные формулы и игровые таблицы в `src/logic/calculator` сохранены без изменений.
 
-Try it: https://stiffi136.github.io/wardogs-artillery-calculator/
+## Как пользоваться
 
-![WARDOGS Artillery Calculator interface](docs/screenshots/screen1.png)
+1. Войди в голосовой канал своего Discord-сервера и отправь `/jarvis` или `/джарвис`.
+2. Скажи «Джарвис, орудие икс 45 игрек 32», затем «Джарвис, цель икс 48 игрек 36».
+3. Ответ: дальность 500 м, азимут 36,9°, прицел 461 мил.
+4. `/jarvis команда: панель` выдаёт личную ссылку на общую веб-панель. Можно пользоваться полями и текстовыми командами без микрофона.
 
-## User Guide
+Поддерживаются обе позиции одной фразой, русские числительные и десятичные дроби, миномёт / САУ SPH-2, высокая / низкая траектория САУ, расчёт, повтор, сброс, тише, громче, стоп и уходи. Можно сказать только «Джарвис», дождаться ответа и назвать команду в течение 15 секунд. Ожидание привязано к говорящему. После команды «орудие» или «цель» можно отдельной фразой назвать X/Y. Неполная или некорректная пара не изменяет состояние.
 
-### Entering coordinates
+Обычное сообщение «Джарвис» тоже вызывает бота, если включены Message Content Intent в Developer Portal и `DISCORD_MESSAGE_CONTENT=true`. Slash-команды работают без этого привилегированного intent. Один экземпляр обслуживает один разрешённый сервер и один голосовой канал одновременно; сессия общая. Если люди вышли из канала, бот отключается.
 
-Enter complete artillery and target coordinates in the input fields. The fire solution updates immediately. The selected language, most recently used coordinates, and output volume are saved locally in your browser; no personal data is collected.
+## Голос
 
-One coordinate unit equals 100 metres. The azimuth is calculated with `atan2(deltaX, deltaY)`: 0° is north and 90° is east. Matching artillery and target coordinates show an azimuth of 0°.
+- Приём Discord: `discord.js` + `@discordjs/voice` с DAVE и Opus.
+- Распознавание: внутренний OpenAI-совместимый GigaAM, `POST /v1/audio/transcriptions`. Укажите `ASR_URL` своего локального сервиса.
+- Озвучка: отдельный Piper, голос `ru_RU-denis-medium`, спокойный мужской русский голос. Движок [GPL-3.0](https://github.com/OHF-Voice/piper1-gpl); сведения о модели и наборе CC0 — [MODEL_CARD](https://huggingface.co/rhasspy/piper-voices/blob/main/ru/ru_RU/denis/medium/MODEL_CARD). Модель закреплена по ревизии.
 
-Choose the appropriate weapon and, for mortars, the desired trajectory. The calculator reports when the target is outside the selected weapon's range.
+Аудио временно обрабатывается в оперативной памяти. Для распознавания обращения ASR получает короткие фразы участников, пока бот находится в канале. Записи не сохраняются; в журнал панели попадают только команды, журнал ограничен 20 записями и исчезает после перезапуска. Координаты и настройки сохраняются в Docker volume. Приём голоса не является официально документированной частью Discord API; после обновлений Discord нужен реальный тест звонка.
 
-### Voice control
+## Запуск
 
-Select English or German in the application, then start voice control and allow microphone access when prompted. The app runs speech recognition locally with Whisper; recorded audio is not sent to a server or stored permanently.
+Node.js 24, Docker Compose; для локального сервера нужен FFmpeg.
 
-English voice-command examples:
-
-- `Artillery X 45 Y 32, target X 67 Y 81`
-- `Gun X 45 Y 32 target X 67 Y 81`
-- `Artillery X 45 Y 32`
-- `Target X 67 Y 81`
-- `X 67 Y 81` — without a command, this is used as the target coordinate
-- `Calculate`, `result`, `read`, `reset`, or `stop`
-
-For reliable separation, say coordinates with their axes: `X 67 Y 81`. The parser ignores surrounding letters and uses the recognized numbers, so `x67 y81` works too. You can also give coordinates step by step: say `target`, then `X 67 Y 81`; or say `artillery`, then `X 45 Y 32`. Number words and decimal values such as `forty five thirty two` and `45 point 32` are supported. Incomplete coordinate pairs are ignored.
-
-Voice control requires a modern browser with microphone access, Web Workers, Web Audio, and Speech Synthesis. WebGPU is preferred; if it is unavailable, Transformers.js uses WASM/CPU instead. The first Whisper download is about 300 MB, so loading may take some time depending on the device and connection.
-
-## Developer Guide
-
-### Local development
-
-```bash
-npm install
-npm run dev
-```
-
-Other useful commands:
-
-```bash
+```sh
+npm ci
+cp .env.example .env
+# PANEL_TOKEN: сгенерировать openssl rand -hex 32; не публиковать
+# DISCORD_TOKEN: токен отдельного bot application, не токен пользователя
+# DISCORD_GUILD_ID: ID разрешённого сервера
+# PUBLIC_URL: адрес панели
+npm test
 npm run build
-npm run lint
-npm run preview
+node --env-file=.env --import tsx server/index.ts
 ```
 
-### Local Whisper model
+Для разработки React: `npm run dev`, сервер отдельно `npm run dev:server` с переменными окружения. Vite проксирует `/api` на localhost:3000.
 
-The calculator works without the model, but voice control requires the model files at `public/models/onnx-community/whisper-base/`. Download them with:
-
-```bash
-npm run download:model
+```sh
+docker compose up -d --build
+docker compose ps
 ```
 
-The model is intentionally not committed to Git: GitHub rejects ordinary files above 100 MiB, and Git LFS is not compatible with GitHub Pages. The browser caches the model after it has been downloaded.
+Compose рассчитан на docker-mam: внешняя сеть `proxy`, Traefik с HTTPS и доменом `jarvis.dixel.store`, существующий GigaAM через host gateway. Для другого сервера измените домен/сеть/ASR. Piper не публикует порт на хосте. Для доступа к панели откройте `PUBLIC_URL/#token=PANEL_TOKEN` один раз: секрет удаляется из адресной строки, далее используется HttpOnly cookie. Без него API не отдаёт расчёт или журнал. Не публикуйте личную ссылку.
 
-### GitHub Pages deployment
+## Подключение Discord
 
-The workflow in `.github/workflows/deploy-pages.yml` downloads the required files from `onnx-community/whisper-base` into `public/models/`, then publishes them with the Vite build. Before the first deployment, set **Pages** to use **GitHub Actions** in the repository settings. Every push to `main` then deploys the static app and model; the browser fetches the model from the same GitHub Pages domain.
+В [Developer Portal](https://discord.com/developers/applications) создайте отдельное приложение с ботом. Токен запишите непосредственно в серверный `.env` с правами 600. Приглашение: scopes `bot applications.commands`, права View Channel, Send Messages, Connect, Speak (3148800); Administrator не нужен. Заполните `DISCORD_GUILD_ID`, перезапустите только `app`. Бот зарегистрирует две slash-команды в указанном сервере. Без токена/ID веб-панель работает, а статус честно показывает, что Discord не настроен.
 
-### Project structure
+## Проверки и ограничения
 
-- `src/logic/calculator` — coordinate validation, central map configuration, and azimuth/distance calculation.
-- `src/logic/speech` — microphone recording, RMS VAD with a 500 ms pre-roll, speech session, Whisper web worker, command parser, and speech output.
-- `src/App.tsx` — responsive UI and application state.
+`npm test` проверяет формулы, разбор русского языка, неполные команды, сохранение состояния, аутентификацию HTTP, Origin и конфликты версий. `npm run build` включает typecheck клиента и сервера. `npm run lint` — Oxlint. CI выполняет эти проверки без деплоя.
+
+После подключения к настоящему Discord обязательно проверить: вход по `/jarvis`, ответ на слово «Джарвис», две координаты голосом, повтор результата, смену участников (DAVE), стоп и уход. Тесты и здоровые контейнеры не подтверждают успешный приём Discord-аудио.
+
+Приложение предназначено для **игры WARDOGS**, использует её координаты и исходные игровые таблицы. Исходный проект не содержит отдельного файла LICENSE; этот форк не объявляет новую лицензию на чужой код. У зависимостей и голосовой модели собственные лицензии.
