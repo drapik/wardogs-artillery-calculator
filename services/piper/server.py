@@ -44,7 +44,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             output = io.BytesIO()
             with wave.open(output, 'wb') as wav:
-                voice.synthesize_wav(text, wav, syn_config=SynthesisConfig(length_scale=1.03, noise_scale=0.55, noise_w_scale=0.7))
+                voice.synthesize_wav(text, wav, syn_config=SynthesisConfig(length_scale=1.20, noise_scale=0.55, noise_w_scale=0.7))
             body = output.getvalue()
             self.send_response(200)
             self.send_header('Content-Type', 'audio/wav')
